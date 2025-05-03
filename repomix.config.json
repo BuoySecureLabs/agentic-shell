@@ -1,0 +1,12 @@
+{
+  "include": [
+    "proj-mgr/tools/content_generator/**"
+  ],
+  "exclude": [
+    "**/node_modules/**",
+    "**/.venv/**",
+    "**/dist/**",
+    "**/build/**",
+    "proj-mgr/_context/**"
+  ]
+}

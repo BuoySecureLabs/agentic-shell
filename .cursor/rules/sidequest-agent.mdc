@@ -1,0 +1,52 @@
+---
+description: 
+globs: sidequest-builder.md
+alwaysApply: false
+---
+# Sidequest Agent Rule
+
+**Rule Name:** sidequest-agent
+**Description:** Enforces the strict, sequential workflow for analyzing a problem statement, planning its implementation, and generating execution prompts and tracking files, as defined in `.cursor/prompts/sidequest-builder.md`.
+
+**Trigger:** This rule MUST be applied whenever initiating or continuing a "sidequest" task, typically triggered by receiving a `[ProblemStatement]` intended for this workflow or by user commands like `sq proceed`, `sq continue`, or `sq rabbit trail` during execution.
+
+**Core Requirements:**
+
+1.  **Strict Workflow Adherence:** You MUST follow the exact sequence of steps (**Step 0 through Step 9**) detailed in `.cursor/prompts/sidequest-builder.md`. No steps may be skipped, combined, or reordered unless explicitly part of a defined loop (e.g., Step 4 refinement) or conditional execution path. You MUST explicitly check the current state using `sq-helper-get-current-step` before executing a step and save the state using `sq-helper-save-state` upon successful completion of each step, as specified in the workflow.
+2.  **Step 0 - Helper Validation:** You MUST perform Step 0 (`Validate Helper Functions`) at the very beginning of the workflow as defined in `sidequest-builder.md`.
+3.  **Step 1 - Initialization:** You MUST correctly determine and use the next available sequential `sq-[number]` (e.g., `sq-001`, `sq-002`) for directory and file naming within `proj-mgr/_context/` (Step 1.5) and use this determined number consistently throughout. You MUST also execute the mandatory Git branching (`sq-helper-create-branch [determined_number]`) specified in Step 1.6.
+4.  **Mandatory `vibe-tools` Parameters:** All `vibe-tools` commands specified in the workflow MUST be executed with the **EXACT** `provider`, `model`, and `reasoning-effort` parameters defined either within the command's specification in `sidequest-builder.md` or sourced from the configuration variables (e.g., `$SQ_ANALYSIS_PROVIDER`) detailed in the "Configuration Options" section of `sidequest-builder.md` (or the `.sidequest-config` file). DO NOT substitute models or omit parameters. Verify parameters before execution.
+5.  **Backtick Replacement:** You MUST replace any backtick characters (`) within the natural language prompts passed to `vibe-tools` commands with single quote characters (\'), as specified in the Critical Guardrails of `sidequest-builder.md`.
+6.  **Context Management (`repomix.config.json`):** Before executing `vibe-tools repo` or `vibe-tools plan` commands as specified within the helper functions called in Steps 2, 3, 4, 6, 8.3, and 9 (specifically for `sq-helper-scope-finder`, `sq-helper-plan-generator`, `sq-helper-plan-evaluator`, `sq-helper-task-list-creator`, `sq-helper-evaluate-quality`, `sq-helper-validate-pr`, and PR description generation), you MUST:
+    *   Backup the current `repomix.config.json` (e.g., to `repomix.config.json.sqbak`).
+    *   Overwrite `repomix.config.json` to include **ONLY** the relevant `proj-mgr/_context/sq-[determined_number]/` path for the current sidequest instance, as detailed in the `sq-helper-scope-context` function definition.
+    *   Execute the `vibe-tools` command.
+    *   Restore the original `repomix.config.json` from the backup **immediately** after the command finishes, regardless of success or failure, as detailed in the `sq-helper-restore-context` function definition.
+7.  **Plan Refinement Loop (Step 4):** The implementation plan (`sq-ap-3.md`) MUST be evaluated (Step 4.3 using `sq-helper-plan-evaluator`) and refined (Step 4.5 Action) iteratively until the evaluation score (from `sq-ap-4.md`) is >= the configured `$SQ_QUALITY_THRESHOLD`.
+8.  **Task Execution Loop (Step 8):** When executing the plan via `proj-mgr/_context/sq-prompt.md`, follow the iterative process precisely as defined in `sidequest-builder.md`, including:
+    *   Identifying the next incomplete task considering dependencies (Step 8.1).
+    *   Implementing the task based on the plan (`sq-plan.md`) and determining if code was changed (Step 8.2).
+    *   **MANDATORY Linting (Step 8.2.1 - Conditional):** *IF* the implemented task involved code changes:
+        *   You MUST execute `sq-helper-lint-code` (which internally runs `ruff check . --fix` then `ruff check .`).
+        *   You MUST analyze the output.
+        *   **IF** errors are reported, you MUST refine the code *solely* to fix the reported linting errors and **LOOP** back to re-run `sq-helper-lint-code` until it reports **NO errors**. This loop MUST complete successfully before proceeding.
+    *   **MANDATORY Testing (Step 8.2.2 - Conditional):** *IF* the implemented task involved code changes AND tests exist, you MUST execute `sq-helper-run-tests` with the appropriate framework command and ensure tests pass before proceeding.
+    *   Evaluate changes using `sq-helper-evaluate-quality` (Step 8.3), **only if** the task involved code changes AND passed the mandatory linting (Step 8.2.1) AND testing (Step 8.2.2 if applicable).
+    *   Refine changes based on evaluation feedback (Step 8.4) until the score is >= `$SQ_QUALITY_THRESHOLD`. **AFTER** applying refinement feedback, you MUST **LOOP** back to the **MANDATORY Linting step (Step 8.2.1)** and potentially the Testing step (8.2.2) to ensure the refined code is also clean and passes tests before re-evaluation.
+    *   **MANDATORY Changelog Update (Step 8.5):** Append a detailed changelog entry to `sq-changelog.md` following the specified format *before* proceeding.
+    *   **MANDATORY Git Staging (Step 8.6):** Execute `git add .` *after* the changelog update.
+    *   **MANDATORY Git Commit (Step 8.7):** Execute `sq-helper-commit-changes [determined_number] "[Task Description]"` *after* staging changes.
+    *   Mark the task complete ('✅') in `sq-tasks.md` *only after* the commit is successful (Step 8.8).
+    *   Report completion (including lint/test/evaluation status) and pause/continue based on Fox Trail mode and task type, awaiting user commands (`sq proceed`, `sq continue`, `sq rabbit trail`, `sq fox trail`, `sq resume`) to control flow (Step 8.9).
+9.  **File Creation:** All specified files (`sq-ap-1.md`, `sq-ap-2.md`, `sq-ap-3.md`, `sq-ap-4.md`, `sq-plan.md`, `sq-tasks.md`, `sq-changelog.md`, `sq-prompt.md`, `sq-pr-description.md`) MUST be created in the correct `proj-mgr/_context/sq-[determined_number]/` directory at the appropriate steps defined in the workflow.
+10. **Step 9 - PR Creation:** Once all tasks in `sq-tasks.md` are complete, you MUST execute Step 9 as defined, including Pre-PR Validation (`sq-helper-validate-pr`), PR Description Generation (using `vibe-tools repo`), and PR Creation (`sq-helper-create-pr`), ensuring the final validation score meets the `$SQ_QUALITY_THRESHOLD` before creating the PR.
+11. **Reference Document:** The definitive source for the workflow steps, helper functions, and configuration is `.cursor/prompts/sidequest-builder.md`. Refer to it if any ambiguity arises. Ensure all helper functions (`sq-helper-*`) are called exactly as defined in that document.
+12. **Incremental File Editing:** When editing markdown files (especially `sq-ap-3.md`, `sq-plan.md`, and other large documents):
+    *   Break down edits into smaller, focused chunks rather than attempting to modify the entire file at once
+    *   Limit each edit operation to a maximum of approximately 2,000 tokens
+    *   For large documents, make sequential edits addressing one section or component at a time
+    *   When refining implementation plans, focus on one module or function at a time
+    *   When implementing tasks that involve multiple files or large code blocks, break the work into incremental steps
+    *   Track progress on large edits by updating task descriptions to reflect completed portions
+
+**Failure to adhere strictly to this rule will compromise the workflow's integrity.**
